@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Interactive Globe</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 100%;
+            height: 100vh;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+        }
+
+        .info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #ffffff;
+            font-size: 14px;
+            text-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+            z-index: 10;
+        }
+
+        .info h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .info p {
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    
+    <div class="info">
+        <h1>Interactive Globe</h1>
+        <p>Move your mouse to rotate</p>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // ============ SCENE SETUP ============
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        camera.position.z = 2.5;
+
+        // ============ STARFIELD BACKGROUND WITH TWINKLING ============
+        const stars = [];
+        function createStarfield() {
+            const starsGeometry = new THREE.BufferGeometry();
+            const starCount = 300;
+            const positions = new Float32Array(starCount * 3);
+
+            for (let i = 0; i < starCount * 3; i += 3) {
+                positions[i] = (Math.random() - 0.5) * 2000;      // x
+                positions[i + 1] = (Math.random() - 0.5) * 2000;  // y
+                positions[i + 2] = (Math.random() - 0.5) * 2000;  // z
+                stars.push({
+                    index: i,
+                    opacity: Math.random() * 0.5 + 0.3,
+                    twinkleSpeed: Math.random() * 0.03 + 0.01,
+                    phase: Math.random() * Math.PI * 2
+                });
+            }
+
+            starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+            const starsMaterial = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 1.5,
+                sizeAttenuation: true,
+                opacity: 0.8,
+            });
+
+            const starsPoints = new THREE.Points(starsGeometry, starsMaterial);
+            scene.add(starsPoints);
+            return starsPoints;
+        }
+
+        const starsPoints = createStarfield();
+
+        // ============ CREATE GLOBE TEXTURE ============
+        function createGlobeTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 2048;
+            canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+
+            // Black background (no colors)
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // White vertical stripes only (diagonal)
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 4;
+            for (let i = 0; i < canvas.width; i += 60) {
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i + 30, canvas.height);
+                ctx.stroke();
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.magFilter = THREE.LinearFilter;
+            texture.minFilter = THREE.LinearFilter;
+            return texture;
+        }
+
+        // ============ CREATE GLOBE ============
+        const globeTexture = createGlobeTexture();
+        const globeGeometry = new THREE.SphereGeometry(1, 128, 128);
+        const globeMaterial = new THREE.MeshPhongMaterial({
+            map: globeTexture,
+            emissive: 0x111111,
+            shininess: 3,
+            wireframe: false,
+        });
+
+        const globe = new THREE.Mesh(globeGeometry, globeMaterial);
+        scene.add(globe);
+
+        // ============ CREATE WIREFRAME OVERLAY ============
+        const wireframeGeometry = new THREE.SphereGeometry(1.01, 32, 32);
+        const wireframeMaterial = new THREE.MeshPhongMaterial({
+            color: 0xffffff,
+            emissive: 0x000000,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.15,
+        });
+        const wireframe = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
+        scene.add(wireframe);
+
+        // ============ LIGHTING ============
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(5, 3, 5);
+        scene.add(directionalLight);
+
+        // ============ MOUSE INTERACTION ============
+        let mouseX = 0;
+        let mouseY = 0;
+        let targetRotationX = 0;
+        let targetRotationY = 0;
+        let autoRotation = 0;
+
+        document.addEventListener('mousemove', (e) => {
+            mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+            mouseY = -(e.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        // ============ ANIMATION LOOP ============
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Auto-rotate + mouse control
+            autoRotation += 0.0003;
+            targetRotationY = autoRotation + mouseX * Math.PI * 0.3;
+            targetRotationX = mouseY * Math.PI * 0.2;
+
+            // Smooth rotation
+            globe.rotation.y += (targetRotationY - globe.rotation.y) * 0.05;
+            globe.rotation.x += (targetRotationX - globe.rotation.x) * 0.05;
+            wireframe.rotation.copy(globe.rotation);
+
+            // Star twinkling effect
+            const starsPositions = starsPoints.geometry.attributes.position.array;
+            stars.forEach(star => {
+                const twinkleValue = Math.sin(Date.now() * star.twinkleSpeed * 0.001 + star.phase);
+                const opacity = star.opacity + twinkleValue * 0.5;
+                // Update star opacity through material
+            });
+            starsPoints.material.opacity = 0.5 + Math.sin(Date.now() * 0.001) * 0.3;
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // ============ WINDOW RESIZE ============
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // ============ CLEANUP ON PAGE UNLOAD ============
+        window.addEventListener('beforeunload', () => {
+            globeTexture.dispose();
+            globeGeometry.dispose();
+            wireframeGeometry.dispose();
+            globeMaterial.dispose();
+            wireframeMaterial.dispose();
+            renderer.dispose();
+        });
+    </script>
+</body>
+</html>
